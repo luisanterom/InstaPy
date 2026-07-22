@@ -1392,6 +1392,102 @@ class InstaPy:
 
 
 
+    def find_user_in_location(self,
+                              locations=None,
+                              target_username=None,
+                              amount=50,
+                              media=None,
+                              skip_top_posts=True,
+                              interact=False):
+        """Searches given locations for posts made by `target_username`.
+        Matches are stored in `self.found_user_posts` as a list of
+        {"location": location, "link": link} dicts. If `interact` is True,
+        matched posts are liked."""
+        if self.aborting:
+            return self
+
+        if not target_username:
+            self.logger.warning("--> No target_username given for find_user_in_location\n")
+            return self
+
+        self.found_user_posts = []
+        locations = locations or []
+        self.quotient_breach = False
+
+        for index, location in enumerate(locations):
+            if self.quotient_breach:
+                break
+
+            self.logger.info('Location [{}/{}]'
+                             .format(index + 1, len(locations)))
+            self.logger.info('--> {}'.format(location.encode('utf-8')))
+
+            try:
+                links = get_links_for_location(self.browser,
+                                               location,
+                                               amount,
+                                               self.logger,
+                                               media,
+                                               skip_top_posts)
+            except NoSuchElementException as exc:
+                self.logger.warning("Error occured while getting images from location: {}  "
+                                    "~maybe too few images exist\n\t{}\n".format(location, str(exc).encode("utf-8")))
+                continue
+
+            for i, link in enumerate(links):
+                self.logger.info('[{}/{}]'.format(i + 1, len(links)))
+                self.logger.info(link)
+
+                try:
+                    inappropriate, user_name, is_video, reason, scope = (
+                        check_link(self.browser,
+                                   link,
+                                   self.dont_like,
+                                   self.mandatory_words,
+                                   self.ignore_if_contains,
+                                   self.logger)
+                    )
+                except NoSuchElementException as err:
+                    self.logger.error('Invalid Page: {}'.format(err))
+                    continue
+
+                if user_name != target_username:
+                    continue
+
+                self.logger.info("--> Found target user '{}' at location {}: {}"
+                                 .format(target_username, location, link))
+                self.found_user_posts.append({"location": location, "link": link})
+
+                if interact:
+                    if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                        self.logger.warning("--> Like quotient reached its peak!\t~leaving Find-User-In-Location activity\n")
+                        self.quotient_breach = True
+                        self.jumps["consequent"]["likes"] = 0
+                        break
+
+                    web_address_navigator(self.browser, link)
+                    like_state, msg = like_image(self.browser,
+                                       user_name,
+                                       self.blacklist,
+                                       self.logger,
+                                       self.logfolder)
+
+                    if like_state == True:
+                        self.liked_img += 1
+                        # reset jump counter after a successful like
+                        self.jumps["consequent"]["likes"] = 0
+                    elif msg == "jumped":
+                        # will break the loop after certain consecutive jumps
+                        self.jumps["consequent"]["likes"] += 1
+
+        if not self.found_user_posts:
+            self.logger.info("--> User '{}' was not found in the given locations\n"
+                             .format(target_username))
+
+        return self
+
+
+
     def like_by_tags(self,
                      tags=None,
                      amount=50,
